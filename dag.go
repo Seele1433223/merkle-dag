@@ -1,5 +1,5 @@
 package merkledag
-
+//
 import (
 	"encoding/json"
 	"hash"
@@ -165,7 +165,7 @@ func sliceDirectory(node Dir, store KVStore, h hash.Hash) *Object {
 				Hash: h.Sum(nil),
 				Size: int(dir.Size()),
 				Name: dir.Name(),
-			})
+			}）
 			elemType := "tree"
 			tree.Data = append(tree.Data, []byte(elemType)...)
 		}
