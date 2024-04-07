@@ -1,8 +1,19 @@
 package merkledag
-//
+
 import (
 	"encoding/json"
 	"hash"
+)
+
+const (
+	LIST_LIMIT  = 2048
+	BLOCK_LIMIT = 256 * 1024
+)
+
+const (
+	BLOB = "blob"
+	LIST = "list"
+	TREE = "tree"
 )
 
 type Link struct {
@@ -16,8 +27,26 @@ type Object struct {
 	Data  []byte
 }
 
-func dfsForSlice(hight int, node File, store KVStore, seedId int, h hash.Hash) (*Object, int) {
-	if hight == 1 {
+func Add(store KVStore, node Node, h hash.Hash) []byte {
+	// TODO Write the shard to KVStore and return Merkle Root
+
+	if node.Type() == FILE {
+		file := node.(File)
+		fileSlice := storeFile(file, store, h)
+		jsonData, _ := json.Marshal(fileSlice)
+		h.Write(jsonData)
+		return h.Sum(nil)
+	} else {
+		dir := node.(Dir)
+		dirSlice := storeDirectory(dir, store, h)
+		jsonData, _ := json.Marshal(dirSlice)
+		h.Write(jsonData)
+		return h.Sum(nil)
+	}
+}
+
+func compute(height int, node File, store KVStore, seedId int, h hash.Hash) (*Object, int) {
+	if height == 1 {
 		if (len(node.Bytes()) - seedId) <= 256*1024 {
 			data := node.Bytes()[seedId:]
 			blob := Object{
@@ -78,7 +107,7 @@ func dfsForSlice(hight int, node File, store KVStore, seedId int, h hash.Hash) (
 			if seedId >= len(node.Bytes()) {
 				break
 			}
-			child, childLen := dfsForSlice(hight-1, node, store, seedId, h)
+			child, childLen := compute(height-1, node, store, seedId, h)
 			totalLen += childLen
 			jsonData, _ := json.Marshal(child)
 			h.Reset()
@@ -104,7 +133,7 @@ func dfsForSlice(hight int, node File, store KVStore, seedId int, h hash.Hash) (
 	}
 }
 
-func sliceFile(node File, store KVStore, h hash.Hash) *Object {
+func storeFile(node File, store KVStore, h hash.Hash) *Object {
 	if len(node.Bytes()) <= 256*1024 {
 		data := node.Bytes()
 		blob := Object{
@@ -121,27 +150,27 @@ func sliceFile(node File, store KVStore, h hash.Hash) *Object {
 		return &blob
 	}
 	linkLen := (len(node.Bytes()) + (256*1024 - 1)) / (256 * 1024)
-	hight := 0
+	height := 0
 	tmp := linkLen
 	for {
-		hight++
+		height++
 		tmp /= 4096
 		if tmp == 0 {
 			break
 		}
 	}
-	res, _ := dfsForSlice(hight, node, store, 0, h)
+	res, _ := compute(height, node, store, 0, h)
 	return res
 }
 
-func sliceDirectory(node Dir, store KVStore, h hash.Hash) *Object {
+func storeDirectory(node Dir, store KVStore, h hash.Hash) *Object {
 	iter := node.It()
 	tree := &Object{}
 	for iter.Next() {
 		elem := iter.Node()
 		if elem.Type() == FILE {
 			file := elem.(File)
-			fileSlice := sliceFile(file, store, h)
+			fileSlice := storeFile(file, store, h)
 			jsonData, _ := json.Marshal(fileSlice)
 			h.Reset()
 			h.Write(jsonData)
@@ -157,7 +186,7 @@ func sliceDirectory(node Dir, store KVStore, h hash.Hash) *Object {
 			tree.Data = append(tree.Data, []byte(elemType)...)
 		} else {
 			dir := elem.(Dir)
-			dirSlice := sliceDirectory(dir, store, h)
+			dirSlice := storeDirectory(dir, store, h)
 			jsonData, _ := json.Marshal(dirSlice)
 			h.Reset()
 			h.Write(jsonData)
@@ -165,7 +194,7 @@ func sliceDirectory(node Dir, store KVStore, h hash.Hash) *Object {
 				Hash: h.Sum(nil),
 				Size: int(dir.Size()),
 				Name: dir.Name(),
-			}）
+			})
 			elemType := "tree"
 			tree.Data = append(tree.Data, []byte(elemType)...)
 		}
@@ -178,32 +207,4 @@ func sliceDirectory(node Dir, store KVStore, h hash.Hash) *Object {
 		store.Put(h.Sum(nil), jsonData)
 	}
 	return tree
-}
-
-type Link struct {
-	Name string
-	Hash []byte
-	Size int
-}
-
-type Object struct {
-	Links []Link
-	Data  []byte
-}
-
-func Add(store KVStore, node Node, h hash.Hash) []byte {
-	// 将分片写入KVStore，并返回Merkle Root
-	if node.Type() == FILE {
-		file := node.(File)
-		fileSlice := sliceFile(file, store, h)
-		jsonData, _ := json.Marshal(fileSlice)
-		h.Write(jsonData)
-		return h.Sum(nil)
-	} else {
-		dir := node.(Dir)
-		dirSlice := sliceDirectory(dir, store, h)
-		jsonData, _ := json.Marshal(dirSlice)
-		h.Write(jsonData)
-		return h.Sum(nil)
-	}
 }
